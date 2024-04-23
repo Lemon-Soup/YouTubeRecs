@@ -1,0 +1,652 @@
+---
+title: "YTRecs_NetworkAnalysis"
+output: html_document
+date: "2023-07-27"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Setup
+
+```{r Load packages}
+require(igraph)
+require(intergraph)
+
+library(dplyr)
+library(readr)
+library(RColorBrewer)
+```
+
+```{r Import Data}
+
+metadata <- read.csv('graph_metadata.csv', header = TRUE, as.is = TRUE)[,-c(1)]
+edgelist_E <- read.csv('net_edgelist_e.csv',header = TRUE, as.is = TRUE)[,-c(1)]
+edgelist_E_clicked <- edgelist_E %>%
+  filter(clickpath == 'True')
+
+edgelist_E_clicked <- edgelist_E_clicked %>% 
+  mutate(across(source, ~ if_else(.x == 'search_results', "landing_page", source))) %>%
+  mutate(across(source, ~ if_else(.x == '#NAME?', "bd8h0nGRA_c", source)))
+
+edgelist_NE <- read.csv('net_edgelist_ne.csv',header = TRUE, as.is = TRUE)[,-c(1)]
+```
+
+```{r Create Bipartite Network Data}
+
+# Subset the search results pages for engaged
+edgelist_Esub <- edgelist_E %>%
+  filter(source == 'landing_page')
+edgelist_Esub$date <- as.Date(edgelist_Esub$date)
+edgelist_Esub$sourcetemp <- paste(edgelist_Esub$source, edgelist_Esub$date, sep="_")
+edgelist_Esub$source <- edgelist_Esub$target
+edgelist_Esub$target <- edgelist_Esub$sourcetemp
+
+# Distinguish "Source Events" for non-engaged
+edgelist_NE$date <- as.Date(edgelist_NE$date)
+edgelist_NE$sourcetemp <- paste(edgelist_NE$source, edgelist_NE$date, sep="_")
+edgelist_NE$source <- edgelist_NE$target
+edgelist_NE$target <- edgelist_NE$sourcetemp
+```
+
+```{r Create Networks}
+set.seed(1234)
+
+# Create Engaged FULL Networks
+network_E <- graph_from_data_frame(edgelist_E, directed = TRUE)
+df <- data.frame(data_index = V(network_E)$name)
+df <- merge(df,metadata, all.x = TRUE, by = 'data_index', sort = FALSE)
+network_E <- graph_from_data_frame(edgelist_E, vertices = df)
+
+# Create Engaged Clicked Network
+clicknet <- graph_from_data_frame(edgelist_E_clicked, directed = TRUE)
+df <- data.frame(data_index = V(clicknet)$name)
+df <- merge(df,metadata, all.x = TRUE, by = 'data_index', sort = FALSE)
+clicknet <- graph_from_data_frame(edgelist_E_clicked, vertices = df)
+
+# Create Engaged LP Network
+network_Esub <- graph_from_data_frame(edgelist_Esub, directed = TRUE)
+df <- data.frame(data_index = V(network_Esub)$name)
+df <- merge(df,metadata, all.x = TRUE, by = 'data_index', sort = FALSE)
+network_Esub <- graph_from_data_frame(edgelist_Esub, vertices = df)
+V(network_Esub)$type <- bipartite.mapping(network_Esub)$type # Add bipartite information
+onemode_Esub <- bipartite_projection(network_Esub)$proj1
+
+# Create Non Engaged Network
+network_NE <- graph_from_data_frame(edgelist_NE, directed = TRUE)
+df <- data.frame(data_index = V(network_NE)$name)
+df <- merge(df,metadata, all.x = TRUE, by = 'data_index', sort = FALSE)
+network_NE <- graph_from_data_frame(edgelist_NE, vertices = df)
+V(network_NE)$type <- bipartite.mapping(network_NE)$type # Add bipartite information
+onemode_NE <- bipartite_projection(network_NE)$proj1
+```
+
+```{r Plot Full Engaged Network}
+#pdf("Full Engaged Network.pdf", width = 10, height = 12)
+
+# Configure colours based on cluster
+clus_colvec <- c('#e29cd2','#bbffff','#f08080','#a7f432','#ffa343')
+cluscol <- clus_colvec[(as.numeric(as.factor(V(network_E)$cluster)))]
+clusleg <- unique(cbind(V(network_E)$cluster, cluscol))[-c(6),]
+
+# Colour clicked
+clic_colvec <- c('white','#27408b')
+clicol <- clic_colvec[(as.numeric(as.factor(V(network_E)$clicked)))]
+
+clipath_colvec <- c('#dbdbdb','#27408b')
+clipathcol <- clipath_colvec[(as.numeric(as.factor(E(network_E)$clickpath)))]
+clipathleg <- unique(cbind(E(network_E)$clickpath, clipathcol))
+
+network_E <- set_vertex_attr(network_E, "label", index = V(network_E), NA)
+network_E <- set_vertex_attr(network_E, "label", index = V(network_E)[[1]], value="Landing Page")
+
+plot(network_E, 
+     #main="Engaged Persona - Full Network",
+     vertex.size = 0.5,
+     #vertex.label = V(network_E)$name, #'',
+     vertex.label = '',
+     vertex.label.cex = 0.1,
+     vertex.color = cluscol,
+     vertex.frame.color = cluscol,
+     edge.width = as.numeric(as.factor(E(network_E)$clickpath))/2,
+     edge.color = clipathcol,
+     edge.arrow.size=0.1,
+     layout=layout.kamada.kawai
+    
+     )
+
+ par(mar = c(0,0,0,0))
+ 
+# Add legend
+legend("topright",
+       legend = clusleg[,1],
+       fill = clusleg[,2],
+       cex = 0.5,
+       title = 'Clusters'
+       )
+
+# Add legend
+legend("bottomright",
+       legend = clipathleg[,1],
+       fill = clipathleg[,2],
+       cex = 0.5,
+       title = 'Clicked'
+       )
+```
+
+```{r Plot clicked links network}
+#pdf("DEVClicked Engaged Network.pdf", width = 10, height = 12)
+
+# Configure colours based on cluster
+clus_colvec <- c('#e29cd2','#bbffff','#f08080','#a7f432','#ffa343')
+cluscol <- clus_colvec[(as.numeric(as.factor(V(clicknet)$cluster)))]
+clusleg <- unique(cbind(V(clicknet)$cluster, cluscol))[-c(6),]
+
+plot(clicknet, 
+     main="Engaged Persona - Network of Clicks",
+     vertex.size = 1,
+     vertex.label = V(clicknet)$name,
+     vertex.label = '',
+     vertex.label.cex = 0.1,
+     vertex.color = cluscol,
+     vertex.frame.color = cluscol,
+     edge.width = 0.5,
+     edge.color = '#27408b',
+     edge.arrow.size=0.01,
+     layout=layout.kamada.kawai
+     )
+
+# Add legend
+legend("topright",
+       legend = clusleg[,1],
+       fill = clusleg[,2],
+       cex = 0.5,
+       title = 'Clusters'
+       )
+
+```
+
+```{r Plot Engaged Bipartite Network}
+#pdf("DEV Landing Page Affiliation Engaged Network.pdf", width = 10, height = 12)
+
+# Configure colours based on cluster
+clus_colvec <- c('#e29cd2','#bbffff','#f08080','#a7f432','#ffa343')
+cluscol <- clus_colvec[(as.factor(V(onemode_Esub)$cluster))]
+clusleg <- unique(cbind(V(onemode_Esub)$cluster, cluscol))
+
+plot(onemode_Esub,
+     main="Landing Page Affilitaton Network - Engaged Persona",
+     vertex.size = 3,
+     vertex.label.cex = 0.1,
+     vertex.label = V(onemode_Esub)$name,
+     #vertex.label = '',
+     vertex.color = cluscol,
+     vertex.frame.color = cluscol,
+     edge.arrow.size=0.1,
+     edge.width = 0.1,
+     edge.color = '#5b92e5',
+     edge.arrow.size=0.01,
+     layout=layout.kamada.kawai)
+
+# Add legend
+legend("bottomright",
+       legend = clusleg[,1],
+       fill = clusleg[,2],
+       cex = 0.5,
+       title = 'Clusters'
+       )
+```
+
+```{r Plot Non Engaged Bipartite Network}
+#pdf("DEV Landing Page Affiliation Non Engaged Network.pdf", width = 10, height = 12)
+
+# Configure colours based on cluster
+clus_colvec <- c('#e29cd2','#bbffff','#f08080','#a7f432','#ffa343')
+cluscol <- clus_colvec[(as.factor(V(onemode_NE)$cluster))]
+clusleg <- unique(cbind(V(onemode_NE)$cluster, cluscol))
+
+plot(onemode_NE,
+     main="Landing Page Affilitaton Network - Non Engaged Persona",
+     vertex.size = 3,
+     vertex.label.cex = 0.1,
+     vertex.label = V(onemode_NE)$name,
+     #vertex.label = '',
+     vertex.color = cluscol,
+     vertex.frame.color = cluscol,
+     edge.arrow.size=0.1,
+     edge.width = 0.1,
+     edge.color = '#5b92e5',
+     edge.arrow.size=0.01,
+     layout=layout.kamada.kawai
+     )
+
+# Add legend
+legend("bottomright",
+       legend = clusleg[,1],
+       fill = clusleg[,2],
+       cex = 0.5,
+       title = 'Clusters'
+       )
+```
+
+```{r Summary Metrics - Engaged (WON'T USE)}
+
+# Original
+Eapl <- average.path.length(network_E, directed = TRUE, weights = NA) # unweighted
+Etran <- transitivity(network_E) # unweighted
+Erec <- reciprocity(network_E)
+
+# Create a simulated network using the Erdős–Rényi model
+gnm_E <- sample_gnm(n=vcount(network_E), m=ecount(network_E), directed=T)
+gnm_Eapl <- average.path.length(gnm_E, directed = TRUE)
+gnm_Etran <- transitivity(gnm_E)
+gnm_Erec <- reciprocity(gnm_E)
+
+# Create a simulated network using Configuration model 
+Eind <- degree(network_E, mode='in')
+Eoutd <- degree(network_E, mode='out')
+ran_E <- sample_degseq(out.deg=Eoutd, in.deg=Eind, method="simple")
+ran_Eapl <- average.path.length(ran_E, directed = TRUE)
+ran_Etran <- transitivity(ran_E)
+ran_Erec <- reciprocity(ran_E)
+
+# Save the network properties in a table
+res_E <- data.frame(
+  c('Original', 'Erdős–Rényi Model', 'Configuration Model'),
+  c(Eapl, gnm_Eapl, ran_Eapl),
+  c(Etran, gnm_Etran, ran_Etran),
+  c(Erec, gnm_Erec, ran_Erec)
+)
+colnames(res_E) <- c('Top Goods Network', 'Average Path Length', 'Transitivity', 'Reciprocity')
+
+res_E
+```
+
+```{r Summary Metrics APL - Engaged Sub (One Mode Projection)}
+
+# Original
+Esubapl <- average.path.length(onemode_Esub, directed = FALSE, weights = NA) # unweighted
+
+# Create a simulated network using the Erdős–Rényi model
+gnm_Esub_bipartite <- sample_bipartite(n1=length(unique(edgelist_Esub$target)),
+                                     n2=length(unique(edgelist_Esub$source)), 
+                                     type = 'gnm', 
+                                     m = ecount(network_Esub), 
+                                     mode = "in")
+gnm_Esub <- bipartite_projection(gnm_Esub_bipartite)$proj1
+gnm_Esubapl <- average.path.length(gnm_Esub, directed = FALSE)
+
+# Save the network properties in a table
+res_Esub <- data.frame(
+  c('Original', 'Erdős–Rényi Model'),
+  c(Esubapl, gnm_Esubapl)
+)
+colnames(res_Esub) <- c('Top Goods Network', 'Average Path Length')
+
+# Original
+NEapl <- average.path.length(onemode_NE, directed = FALSE, weights = NA) # unweighted
+
+# Create a simulated network using the Erdős–Rényi model
+gnm_NE_bipartite <- sample_bipartite(n1=length(unique(edgelist_NE$target)),
+                                     n2=length(unique(edgelist_NE$source)), 
+                                     type = 'gnm', 
+                                     m = ecount(network_NE), 
+                                     mode = "in")
+gnm_NE <- bipartite_projection(gnm_NE_bipartite)$proj1
+gnm_NEapl <- average.path.length(gnm_NE, directed = FALSE)
+
+# Save the network properties in a table
+res_NE <- data.frame(
+  c('Original', 'Erdős–Rényi Model'),
+  c(NEapl, gnm_NEapl)
+)
+colnames(res_NE) <- c('Top Goods Network', 'Average Path Length')
+
+res_Esub
+res_NE
+```
+
+```{r Influence - Weighted Degree Centrality (videos with most incoming connections)}
+
+# Engaged Degree centrality
+indeg_E <- strength(network_E, mode = "in")
+deg_Esub <- degree(onemode_Esub)
+deg_NE <- degree(onemode_NE)
+
+# Save Top Videos for in a table
+top_indegE <- data.frame(
+  V(network_E)$name[head(order(indeg_E, decreasing = TRUE),10)],
+  indeg_E[head(order(indeg_E, decreasing = TRUE),10)]
+)
+colnames(top_indegE) <- c('VideoId', 'Indegree')
+top_indegE <- merge(top_indegE,metadata, all.x = TRUE, by.x = 'VideoId', by.y = 'data_index', sort = FALSE)
+
+# Save Top Videos for in a table
+top_Esub <- data.frame(
+  V(onemode_Esub)$name[head(order(deg_Esub, decreasing = TRUE),10)],
+  deg_Esub[head(order(deg_Esub, decreasing = TRUE),10)]
+)
+colnames(top_Esub) <- c('VideoId', 'Indegree')
+top_Esub <- merge(top_Esub,metadata, all.x = TRUE, by.x = 'VideoId', by.y = 'data_index', sort = FALSE)
+
+# Save Top Videos for in a table
+top_NE <- data.frame(
+  V(onemode_NE)$name[head(order(deg_NE, decreasing = TRUE),10)],
+  deg_NE[head(order(deg_NE, decreasing = TRUE),10)]
+)
+colnames(top_NE) <- c('VideoId', 'Indegree')
+top_NE <- merge(top_NE,metadata, all.x = TRUE, by.x = 'VideoId', by.y = 'data_index', sort = FALSE)
+```
+
+```{r Influence - PageRank (measure of popularity or access to popularity)}
+
+# Page Rank centrality
+pr_E <- page.rank(network_E, directed = TRUE)$vector
+pr_Esub <- page.rank(onemode_Esub, directed = TRUE)$vector
+pr_NE <- page.rank(onemode_NE, directed = TRUE)$vector
+
+# Save Top Videos for in a table
+top_pr_E <- data.frame(
+  V(network_E)$name[head(order(pr_E, decreasing = TRUE),10)],
+  pr_E[head(order(pr_E, decreasing = TRUE),10)]
+)
+colnames(top_pr_E) <- c('VideoId', 'Page Rank')
+top_pr_E <- merge(top_pr_E,metadata, all.x = TRUE, by.x = 'VideoId', by.y = 'data_index', sort = FALSE)
+
+# Save Top Videos for in a table
+top_pr_Esub <- data.frame(
+  V(onemode_Esub)$name[head(order(pr_Esub, decreasing = TRUE),10)],
+  pr_Esub[head(order(pr_Esub, decreasing = TRUE),10)]
+)
+colnames(top_pr_Esub) <- c('VideoId', 'Page Rank')
+top_pr_Esub <- merge(top_pr_Esub,metadata, all.x = TRUE, by.x = 'VideoId', by.y = 'data_index', sort = FALSE)
+
+# Save Top Videos for in a table
+top_pr_NE <- data.frame(
+  V(onemode_NE)$name[head(order(pr_NE, decreasing = TRUE),10)],
+  pr_NE[head(order(pr_NE, decreasing = TRUE),10)]
+)
+colnames(top_pr_NE) <- c('VideoId', 'Page Rank')
+top_pr_NE <- merge(top_pr_NE,metadata, all.x = TRUE, by.x = 'VideoId', by.y = 'data_index', sort = FALSE)
+
+top_pr_NE
+top_pr_E
+top_pr_Esub
+```
+
+```{r Influence - Betweenness (gateway into different groups)}
+
+# Betweenness centrality
+bet_E <- betweenness(network_E, directed = TRUE)
+bet_Esub <- betweenness(onemode_Esub, directed = FALSE)
+bet_NE <- betweenness(onemode_NE, directed = FALSE)
+
+# Save Top Videos for in a table
+top_betE <- data.frame(
+  V(network_E)$name[head(order(bet_E, decreasing = TRUE),10)],
+  bet_E[head(order(bet_E, decreasing = TRUE),10)]
+)
+colnames(top_betE) <- c('VideoId', 'Betweenness')
+top_betE <- merge(top_betE,metadata, all.x = TRUE, by.x = 'VideoId', by.y = 'data_index', sort = FALSE)
+
+# Save Top Videos for in a table
+top_betEsub <- data.frame(
+  V(onemode_Esub)$name[head(order(bet_Esub, decreasing = TRUE),10)],
+  bet_Esub[head(order(bet_Esub, decreasing = TRUE),10)]
+)
+colnames(top_betEsub) <- c('VideoId', 'Betweenness')
+top_betEsub <- merge(top_betEsub,metadata, all.x = TRUE, by.x = 'VideoId', by.y = 'data_index', sort = FALSE)
+
+# Save Top Videos for in a table
+top_betNE <- data.frame(
+  V(onemode_NE)$name[head(order(bet_NE, decreasing = TRUE),10)],
+  bet_NE[head(order(bet_NE, decreasing = TRUE),10)]
+)
+colnames(top_betNE) <- c('VideoId', 'Betweenness')
+top_betNE <- merge(top_betNE,metadata, all.x = TRUE, by.x = 'VideoId', by.y = 'data_index', sort = FALSE)
+
+top_betE
+top_betNE
+```
+
+```{r Assortativity Analysis}
+
+# Remove nans for analysis
+network_Enan <- delete_vertices(network_E, V(network_E)[is.na(cluster)])
+
+# on cluster
+assortativity_nominal(network_Enan, types=as.factor(V(network_Enan)$cluster), directed = T) # 0.3719226
+assortativity_nominal(onemode_Esub, types=as.factor(V(onemode_Esub)$cluster), directed = T) # 0.09910799
+assortativity_nominal(onemode_NE, types=as.factor(V(onemode_NE)$cluster), directed = T) # 0.008980251
+
+# on datediff
+assortativity(network_Enan, V(network_Enan)$datediff, directed = T) # 0.5337106
+assortativity(onemode_Esub, V(onemode_Esub)$datediff, directed = T) # 0.0722318
+assortativity(onemode_NE, V(onemode_NE)$datediff, directed = T) # -0.03025312
+
+# on viewcount
+assortativity(network_Enan, V(network_Enan)$viewcount, directed = T) # 0.3657369
+assortativity(onemode_Esub, V(onemode_Esub)$viewcount, directed = T) # -0.01610843
+assortativity(onemode_NE, V(onemode_NE)$viewcount, directed = T) # -0.005838735
+
+# on videolength
+assortativity(network_Enan, V(network_Enan)$video_length, directed = T) # 0.3383191
+assortativity(onemode_Esub, V(onemode_Esub)$video_length, directed = T) # 0.1067488
+assortativity(onemode_NE, V(onemode_NE)$video_length, directed = T) # -0.005102996
+
+```
+
+
+```{r Create a model to predict links}
+# Create statnet graph objects
+#detach(package:igraph)
+require(ergm)
+require(sna)
+sn_network_E <- intergraph::asNetwork(network_Enan)
+
+m1 <- ergm(sn_network_E ~ edges
+            + nodematch("cluster") # Cluster of both
+            + nodecov("datediff")
+            + nodecov("viewcount") # How combined datediff impacts likelihood of tie
+            + nodecov("video_length")
+            + nodeicov("viewcount")
+            + nodeicov("video_length")
+            + nodeicov("datediff")
+            + nodecov('tf_title_nouns_concrete')
+            + nodecov('tf_title_nouns_dollar')
+            + nodecov('tf_title_nouns_homemade')
+            + nodecov('tf_title_nouns_ice')
+            + nodecov('tf_title_nouns_motion')
+            + nodecov('tf_title_nouns_soldier')
+            + nodecov('tf_title_adjs_big')
+            + nodecov('tf_title_adjs_free')
+            + nodecov('tf_title_adjs_huge')
+            + nodecov('tf_title_adjs_little')
+            + nodecov('tf_title_adjs_modern')
+            + nodecov('tf_title_adjs_small')
+            + nodecov('tf_title_adjs_white')
+            + nodecov('col_R')
+            + nodecov('tf_title_nouns_deed')
+            + nodecov('tf_title_nouns_get')
+            + nodecov('tf_title_nouns_humanity')
+            + nodecov('tf_title_nouns_july')
+            + nodecov('tf_title_nouns_shopping')
+            + nodecov('tf_title_nouns_try')
+            + nodecov('tf_title_adjs_concrete')
+            + nodecov('tf_title_adjs_full')
+            + nodecov('tf_title_adjs_incredible')
+            + nodecov('tf_title_adjs_military')
+            + nodecov('tf_title_adjs_new')
+            + nodecov('tf_title_adjs_soldier')
+            + nodecov('adult')
+            + nodecov('tf_title_nouns_adoption')
+            + nodecov('spoofed')
+            + nodecov('tf_title_nouns_bathroom')
+            + nodecov('violence')
+            + nodecov('tf_title_nouns_love')
+            + nodecov('racy')
+            + nodecov('tf_title_adjs_best')
+            + nodecov('tf_title_adjs_first')
+            + nodecov('tf_title_adjs_high')
+            + nodecov('tf_title_adjs_last')
+            + nodecov('tf_title_adjs_old')
+            + nodecov('tf_title_adjs_viral')
+)
+          
+
+summary(m1)
+
+```
+
+```{r ERGM 1}
+# Starting maximum pseudolikelihood estimation (MPLE):
+# Evaluating the predictor and response matrix.
+# Maximizing the pseudolikelihood.
+# Finished MPLE.
+# Warning: Model statistics ‘nodeocov.datediff’ are linear combinations of some set of preceding statistics at the current stage of the estimation. This may indicate that the model is nonidentifiable.Stopping at the initial estimate.
+# Evaluating log-likelihood at the estimate. 
+# Call:
+# ergm(formula = sn_network_E ~ edges + nodematch("cluster") + 
+#     nodecov("datediff") + nodecov("viewcount") + nodecov("video_length") + 
+#     nodeicov("viewcount") + nodeicov("video_length") + nodeicov("datediff") + 
+#     nodeocov("datediff") + nodeicov("tf_title_nouns_concrete") + 
+#     nodeicov("tf_title_nouns_dollar") + nodeicov("tf_title_nouns_homemade") + 
+#     nodeicov("tf_title_nouns_ice") + nodeicov("tf_title_nouns_motion") + 
+#     nodeicov("tf_title_nouns_soldier") + nodeicov("tf_title_adjs_big") + 
+#     nodeicov("tf_title_adjs_free") + nodeicov("tf_title_adjs_huge") + 
+#     nodeicov("tf_title_adjs_little") + nodeicov("tf_title_adjs_modern") + 
+#     nodeicov("tf_title_adjs_small") + nodeicov("tf_title_adjs_white") + 
+#     nodeicov("col_R") + nodeicov("tf_title_nouns_deed") + nodeicov("tf_title_nouns_get") + 
+#     nodeicov("tf_title_nouns_humanity") + nodeicov("tf_title_nouns_july") + 
+#     nodeicov("tf_title_nouns_shopping") + nodeicov("tf_title_nouns_try") + 
+#     nodeicov("tf_title_adjs_concrete") + nodeicov("tf_title_adjs_full") + 
+#     nodeicov("tf_title_adjs_incredible") + nodeicov("tf_title_adjs_military") + 
+#     nodeicov("tf_title_adjs_new") + nodeicov("tf_title_adjs_soldier") + 
+#     nodeicov("adult") + nodeicov("tf_title_nouns_adoption") + 
+#     nodeicov("spoofed") + nodeicov("tf_title_nouns_bathroom") + 
+#     nodeicov("violence") + nodeicov("tf_title_nouns_love") + 
+#     nodeicov("racy") + nodeicov("tf_title_adjs_best") + nodeicov("tf_title_adjs_first") + 
+#     nodeicov("tf_title_adjs_high") + nodeicov("tf_title_adjs_last") + 
+#     nodeicov("tf_title_adjs_old") + nodeicov("tf_title_adjs_viral"))
+# 
+# Maximum Likelihood Results:
+# 
+#                                    Estimate Std. Error MCMC %  z value Pr(>|z|)    
+# edges                             -8.166928   0.074495      0 -109.631  < 1e-04 ***
+# nodematch.cluster                  1.321112   0.046440      0   28.448  < 1e-04 ***
+# nodecov.datediff                   0.584592   0.114137      0    5.122  < 1e-04 ***
+# nodecov.viewcount                  0.631768   0.269383      0    2.345 0.019015 *  
+# nodecov.video_length               0.899716   0.233266      0    3.857 0.000115 ***
+# nodeicov.viewcount                -0.346328   0.416410      0   -0.832 0.405578    
+# nodeicov.video_length             -0.972713   0.385146      0   -2.526 0.011551 *  
+# nodeicov.datediff                 -0.423386   0.172496      0   -2.454 0.014109 *  
+# nodeocov.datediff                        NA   0.000000      0       NA       NA    
+# nodeicov.tf_title_nouns_concrete  -0.059969   0.521686      0   -0.115 0.908483    
+# nodeicov.tf_title_nouns_dollar     0.147677   0.187028      0    0.790 0.429762    
+# nodeicov.tf_title_nouns_homemade  -0.023498   0.351760      0   -0.067 0.946741    
+# nodeicov.tf_title_nouns_ice       -0.090658   0.796764      0   -0.114 0.909410    
+# nodeicov.tf_title_nouns_motion    -0.109862   0.316557      0   -0.347 0.728552    
+# nodeicov.tf_title_nouns_soldier   -0.018790   0.235974      0   -0.080 0.936532    
+# nodeicov.tf_title_adjs_big        -0.097246   0.321450      0   -0.303 0.762255    
+# nodeicov.tf_title_adjs_free        0.036277   0.274238      0    0.132 0.894760    
+# nodeicov.tf_title_adjs_huge        0.233164   0.246311      0    0.947 0.343829    
+# nodeicov.tf_title_adjs_little      0.178307   0.294038      0    0.606 0.544243    
+# nodeicov.tf_title_adjs_modern     -0.033461   0.286622      0   -0.117 0.907063    
+# nodeicov.tf_title_adjs_small      -0.127661   0.254314      0   -0.502 0.615680    
+# nodeicov.tf_title_adjs_white      -0.082579   0.256145      0   -0.322 0.747157    
+# nodeicov.col_R                    -0.001859   0.082012      0   -0.023 0.981916    
+# nodeicov.tf_title_nouns_deed       0.083901   0.388943      0    0.216 0.829209    
+# nodeicov.tf_title_nouns_get       -0.161651   0.295273      0   -0.547 0.584063    
+# nodeicov.tf_title_nouns_humanity   0.028341   0.266187      0    0.106 0.915210    
+# nodeicov.tf_title_nouns_july       0.105782   0.159883      0    0.662 0.508213    
+# nodeicov.tf_title_nouns_shopping   0.125731   0.245043      0    0.513 0.607883    
+# nodeicov.tf_title_nouns_try       -0.056281   0.268176      0   -0.210 0.833774    
+# nodeicov.tf_title_adjs_concrete   -0.136223   0.540066      0   -0.252 0.800860    
+# nodeicov.tf_title_adjs_full        0.129117   0.214334      0    0.602 0.546900    
+# nodeicov.tf_title_adjs_incredible -0.026041   0.244806      0   -0.106 0.915286    
+# nodeicov.tf_title_adjs_military    0.341905   0.212091      0    1.612 0.106948    
+# nodeicov.tf_title_adjs_new        -0.212291   0.348475      0   -0.609 0.542391    
+# nodeicov.tf_title_adjs_soldier     0.093581   0.228773      0    0.409 0.682499    
+# nodeicov.adult                     0.283583   0.167073      0    1.697 0.089628 .  
+# nodeicov.tf_title_nouns_adoption  -0.039383   0.291288      0   -0.135 0.892452    
+# nodeicov.spoofed                  -0.562872   0.166119      0   -3.388 0.000703 ***
+# nodeicov.tf_title_nouns_bathroom  -0.017309   0.435971      0   -0.040 0.968330    
+# nodeicov.violence                  0.014504   0.183886      0    0.079 0.937134    
+# nodeicov.tf_title_nouns_love      -0.026592   0.319303      0   -0.083 0.933627    
+# nodeicov.racy                      0.027049   0.109813      0    0.246 0.805437    
+# nodeicov.tf_title_adjs_best       -0.109285   0.151562      0   -0.721 0.470872    
+# nodeicov.tf_title_adjs_first      -0.255422   0.223749      0   -1.142 0.253638    
+# nodeicov.tf_title_adjs_high        0.083122   0.339657      0    0.245 0.806671    
+# nodeicov.tf_title_adjs_last       -0.064764   0.306529      0   -0.211 0.832668    
+# nodeicov.tf_title_adjs_old        -0.013348   0.232689      0   -0.057 0.954256    
+# nodeicov.tf_title_adjs_viral       0.073397   0.305598      0    0.240 0.810194    
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+#      Null Deviance: 4624819  on 3336102  degrees of freedom
+#  Residual Deviance:   30882  on 3336054  degrees of freedom
+#  
+# AIC: 30978  BIC: 31603  (Smaller is better. MC Std. Err. = 0)
+```
+
+```{r ERGM 2}
+# Maximum Likelihood Results:
+# 
+#                                  Estimate Std. Error MCMC % z value Pr(>|z|)    
+# edges                            -8.24457    0.09437      0 -87.360  < 1e-04 ***
+# nodematch.cluster                 1.32094    0.04652      0  28.394  < 1e-04 ***
+# nodecov.datediff                  0.47791    0.11892      0   4.019  < 1e-04 ***
+# nodecov.viewcount                 0.62419    0.27860      0   2.240 0.025064 *  
+# nodecov.video_length              0.83735    0.24311      0   3.444 0.000572 ***
+# nodeicov.viewcount               -0.35082    0.41452      0  -0.846 0.397362    
+# nodeicov.video_length            -0.82123    0.37207      0  -2.207 0.027299 *  
+# nodeicov.datediff                -0.34517    0.16892      0  -2.043 0.041013 *  
+# nodecov.tf_title_nouns_concrete   0.50070    0.30144      0   1.661 0.096711 .  
+# nodecov.tf_title_nouns_dollar    -0.07818    0.13810      0  -0.566 0.571305    
+# nodecov.tf_title_nouns_homemade   0.31519    0.21407      0   1.472 0.140913    
+# nodecov.tf_title_nouns_ice       -0.23124    0.51286      0  -0.451 0.652076    
+# nodecov.tf_title_nouns_motion    -0.41017    0.25954      0  -1.580 0.114015    
+# nodecov.tf_title_nouns_soldier    0.18404    0.15205      0   1.210 0.226112    
+# nodecov.tf_title_adjs_big        -0.41097    0.26176      0  -1.570 0.116411    
+# nodecov.tf_title_adjs_free       -0.05885    0.20814      0  -0.283 0.777386    
+# nodecov.tf_title_adjs_huge        0.14967    0.17933      0   0.835 0.403944    
+# nodecov.tf_title_adjs_little     -0.07776    0.24551      0  -0.317 0.751434    
+# nodecov.tf_title_adjs_modern      0.26083    0.18038      0   1.446 0.148185    
+# nodecov.tf_title_adjs_small      -0.25083    0.18956      0  -1.323 0.185766    
+# nodecov.tf_title_adjs_white       0.21161    0.16092      0   1.315 0.188515    
+# nodecov.col_R                     0.02595    0.05806      0   0.447 0.654929    
+# nodecov.tf_title_nouns_deed      -0.50416    0.30625      0  -1.646 0.099710 .  
+# nodecov.tf_title_nouns_get        0.11892    0.18226      0   0.652 0.514110    
+# nodecov.tf_title_nouns_humanity   0.10841    0.18592      0   0.583 0.559816    
+# nodecov.tf_title_nouns_july       0.27360    0.10597      0   2.582 0.009826 ** 
+# nodecov.tf_title_nouns_shopping   0.07061    0.17866      0   0.395 0.692672    
+# nodecov.tf_title_nouns_try       -0.15885    0.19256      0  -0.825 0.409390    
+# nodecov.tf_title_adjs_concrete    0.31389    0.32551      0   0.964 0.334889    
+# nodecov.tf_title_adjs_full       -0.12892    0.16611      0  -0.776 0.437678    
+# nodecov.tf_title_adjs_incredible  0.10137    0.16598      0   0.611 0.541365    
+# nodecov.tf_title_adjs_military    0.44275    0.14156      0   3.128 0.001761 ** 
+# nodecov.tf_title_adjs_new        -0.32821    0.25685      0  -1.278 0.201304    
+# nodecov.tf_title_adjs_soldier     0.14317    0.15330      0   0.934 0.350350    
+# nodecov.adult                     0.34899    0.11828      0   2.951 0.003172 ** 
+# nodecov.tf_title_nouns_adoption  -0.14735    0.21505      0  -0.685 0.493235    
+# nodecov.spoofed                  -0.51286    0.11593      0  -4.424  < 1e-04 ***
+# nodecov.tf_title_nouns_bathroom   0.07536    0.30772      0   0.245 0.806544    
+# nodecov.violence                  0.26196    0.12734      0   2.057 0.039674 *  
+# nodecov.tf_title_nouns_love       0.05165    0.22589      0   0.229 0.819141    
+# nodecov.racy                     -0.09695    0.07819      0  -1.240 0.215007    
+# nodecov.tf_title_adjs_best        0.12836    0.09750      0   1.316 0.188026    
+# nodecov.tf_title_adjs_first      -0.42355    0.17080      0  -2.480 0.013144 *  
+# nodecov.tf_title_adjs_high        0.34481    0.22619      0   1.524 0.127402    
+# nodecov.tf_title_adjs_last       -0.20235    0.22181      0  -0.912 0.361628    
+# nodecov.tf_title_adjs_old        -0.71734    0.23088      0  -3.107 0.001890 ** 
+# nodecov.tf_title_adjs_viral       0.41260    0.18249      0   2.261 0.023765 *  
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+#      Null Deviance: 4624819  on 3336102  degrees of freedom
+#  Residual Deviance:   30804  on 3336055  degrees of freedom
+#  
+# AIC: 30898  BIC: 31510  (Smaller is better. MC Std. Err. = 0)
+```
+
