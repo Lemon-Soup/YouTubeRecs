@@ -8,3 +8,4 @@ Three tables of replication data and a Network Analysis script are included:
 - 'edgelist_unengaged.csv' : An edgelist of recommended videos to the 'unengaged' user profile.
 - 'video_info.csv' : A table of attributes associated with the collected videos.
 - 'networkAnalysis.Rmd': An R markdown file containing a script to create and analyse networks of recommended content.
+- 'Network Graphs': A folder of graphs showing different projections of the networks of recommended videos.
